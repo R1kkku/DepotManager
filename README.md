@@ -15,8 +15,9 @@ Before running DepotManager, make sure you have the following in the **same fold
 ## Installation
 
 1. Download the latest `DepotManager.exe` from the [Releases](../../releases) page.
-2. Place all DepotDownloaderMod release files in the same folder as `DepotManager.exe`.
-3. Run `DepotManager.exe` — no installation required.
+2. Download **DepotDownloaderMod** from its official release page.
+3. Create a folder and place both `DepotManager.exe` and all DepotDownloaderMod files inside it.
+4. Run `DepotManager.exe` — no installation required.
 
 ## Usage
 
@@ -43,7 +44,7 @@ Before running DepotManager, make sure you have the following in the **same fold
 
 ## Configuration (`settings.json`)
 
-The following settings are saved automatically:
+The following settings are stored in `settings.json`, located in the same folder as the executable. The file is created automatically the first time you save your API Key:
 
 | Key | Default | Description |
 | ----- | --------- | ------------- |
@@ -51,7 +52,9 @@ The following settings are saved automatically:
 | `api_base_url` | `https://manifest.morrenus.xyz/api/v1` | API endpoint |
 | `exe_name` | `DepotDownloaderMod.exe` | Downloader executable name |
 | `max_concurrent_downloads` | `1` | Maximum simultaneous downloads |
-| `request_timeout` | `30` | HTTP request timeout in second |
+| `request_timeout` | `30` | HTTP request timeout in seconds |
+
+You do not need to edit this file manually. All values work out of the box — the only required change is saving your API Key through the application interface.
 
 ## Logging
 
@@ -62,10 +65,11 @@ A `depot_manager.log` file is created in the working directory and contains deta
 - A temporary `keys.txt` file is created during downloads and automatically deleted when the application closes.
 - Manifest files are copied temporarily to the working directory and deleted after each download completes.
 
-## Dependencies (for building from source)
+## Dependencies (If you want to run it with python)
 
 **Install dependencies:**
    Use the `requirements.txt` file to install all necessary libraries (such as `aiohttp`):
 
 ```bash
 pip install -r requirements.txt
+```
