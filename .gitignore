@@ -1,0 +1,17 @@
+# Ignore everything by default (WHITELIST)
+*
+
+# Keep .gitignore
+!.gitignore
+
+# Keep GitHub-related files
+!README.md
+!UNLICENSE
+
+# Keep Assets folder
+!Assets/
+!Assets/**
+
+# Keep Source folder
+!Source/
+!Source/main.py
