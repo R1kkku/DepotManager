@@ -18,8 +18,6 @@ Before running DepotManager, make sure you have the following in the **same fold
 2. Place all DepotDownloaderMod release files in the same folder as `DepotManager.exe`.
 3. Run `DepotManager.exe` — no installation required.
 
-Your folder should look like this:
-
 ## Usage
 
 ### 1. Configure your API Key
@@ -52,8 +50,8 @@ The following settings are saved automatically:
 | `api_key` | *(empty)* | Your Morrenus API key |
 | `api_base_url` | `https://manifest.morrenus.xyz/api/v1` | API endpoint |
 | `exe_name` | `DepotDownloaderMod.exe` | Downloader executable name |
-| `max_concurrent_downloads` | `1` | Maximum simultaneous downloads (Default: 1) |
-| `request_timeout` | `30` | HTTP request timeout in seconds (Default: 30) |
+| `max_concurrent_downloads` | `1` | Maximum simultaneous downloads |
+| `request_timeout` | `30` | HTTP request timeout in second |
 
 ## Logging
 
@@ -66,6 +64,8 @@ A `depot_manager.log` file is created in the working directory and contains deta
 
 ## Dependencies (for building from source)
 
-- Python 3.11+
-- `aiohttp`
-- `tkinter` (included with Python)
+**Install dependencies:**
+   Use the `requirements.txt` file to install all necessary libraries (such as `aiohttp`):
+
+```bash
+pip install -r requirements.txt
