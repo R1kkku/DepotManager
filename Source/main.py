@@ -21,10 +21,15 @@ from tkinter import ttk, messagebox, scrolledtext
 # ---------------------------------------------------------------------------
 # CONSTANTS
 # ---------------------------------------------------------------------------
-BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 
-SETTINGS_FILE = str(BASE_DIR / "settings.json")
-KEYS_FILE = str(BASE_DIR / "keys.txt")
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).parent
+else:
+    APP_DIR = Path(__file__).parent
+
+SETTINGS_FILE = str(APP_DIR / "settings.json")
+KEYS_FILE = str(APP_DIR / "keys.txt")
 
 DEFAULT_SETTINGS: dict = {
     "api_base_url": "https://manifest.morrenus.xyz/api/v1",
@@ -38,13 +43,13 @@ APPID_MIN = 1
 APPID_MAX = 2_000_000_000
 
 _RE_LUA_ADDAPPID = re.compile(r'addappid\((\d+),\s*\d+,\s*"([A-Za-z0-9]+)"\)')
-_RE_LUA_TABLE    = re.compile(r'\[(\d+)\]\s*=\s*"([A-Za-z0-9]+)"')
-_RE_MANIFEST     = re.compile(r'^(\d+)_(\d+)\.manifest$')
+_RE_LUA_TABLE = re.compile(r'\[(\d+)\]\s*=\s*"([A-Za-z0-9]+)"')
+_RE_MANIFEST = re.compile(r'^(\d+)_(\d+)\.manifest$')
 
 # ---------------------------------------------------------------------------
 # LOGGING
 # ---------------------------------------------------------------------------
-LOG_FILE = str(BASE_DIR / "depot_manager.log")
+LOG_FILE = str(APP_DIR / "depot_manager.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -65,7 +70,7 @@ class App(tk.Tk):
         self.title("DepotManager - HighSeas Edition")
         self.geometry("950x780")
 
-        icon_path = BASE_DIR / "icon.ico"
+        icon_path = BUNDLE_DIR / "icon.ico"
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
@@ -464,7 +469,7 @@ class App(tk.Tk):
     # -----------------------------------------------------------------------
     def _on_download_click(self) -> None:
         exe_name = self.settings["exe_name"]
-        exe_path = Path(exe_name) if Path(exe_name).is_absolute() else BASE_DIR / exe_name
+        exe_path = Path(exe_name) if Path(exe_name).is_absolute() else APP_DIR / exe_name
 
         if not exe_path.exists():
             messagebox.showerror("Exec Error", f"Executable not found: {exe_path}")
@@ -559,7 +564,7 @@ class App(tk.Tk):
             return
 
         manifest_id = match.group(1)
-        local_manifest = BASE_DIR / manifest_src.name
+        local_manifest = APP_DIR / manifest_src.name
 
         try:
             await asyncio.to_thread(shutil.copy, str(manifest_src), str(local_manifest))
