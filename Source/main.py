@@ -16,26 +16,15 @@ from typing import Optional
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
-# ---------------------------------------------------------------------------
-# LOGGING
-# ---------------------------------------------------------------------------
-LOG_FILE = "depot_manager.log"
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-logger = logging.getLogger("DepotManager")
 
 # ---------------------------------------------------------------------------
 # CONSTANTS
 # ---------------------------------------------------------------------------
-SETTINGS_FILE = "settings.json"
-KEYS_FILE = "keys.txt"
+BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+
+SETTINGS_FILE = str(BASE_DIR / "settings.json")
+KEYS_FILE = str(BASE_DIR / "keys.txt")
 
 DEFAULT_SETTINGS: dict = {
     "api_base_url": "https://manifest.morrenus.xyz/api/v1",
@@ -48,6 +37,25 @@ DEFAULT_SETTINGS: dict = {
 APPID_MIN = 1
 APPID_MAX = 2_000_000_000
 
+_RE_LUA_ADDAPPID = re.compile(r'addappid\((\d+),\s*\d+,\s*"([A-Za-z0-9]+)"\)')
+_RE_LUA_TABLE    = re.compile(r'\[(\d+)\]\s*=\s*"([A-Za-z0-9]+)"')
+_RE_MANIFEST     = re.compile(r'^(\d+)_(\d+)\.manifest$')
+
+# ---------------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------------
+LOG_FILE = str(BASE_DIR / "depot_manager.log")
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger("DepotManager")
+
 # ---------------------------------------------------------------------------
 # APPLICATION
 # ---------------------------------------------------------------------------
@@ -57,8 +65,7 @@ class App(tk.Tk):
         self.title("DepotManager - HighSeas Edition")
         self.geometry("950x780")
 
-        base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-        icon_path = base_path / "icon.ico"
+        icon_path = BASE_DIR / "icon.ico"
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
@@ -339,7 +346,8 @@ class App(tk.Tk):
         self._current_temp_dir = temp_dir
         logger.debug("Temporary directory created: %s", temp_dir)
 
-        assert self.session is not None
+        if self.session is None:
+            raise RuntimeError("HTTP session is not initialized.")
 
         try:
             async with self.session.get(url, headers=headers, timeout=timeout) as r:
@@ -418,19 +426,16 @@ class App(tk.Tk):
                 logger.warning("Cannot read %s: %s", lua_file.name, exc)
                 continue
 
-            matches = re.findall(r'addappid\((\d+),\s*\d+,\s*"([A-Za-z0-9]+)"\)', content) or \
-                      re.findall(r'\[(\d+)\]\s*=\s*"([A-Za-z0-9]+)"', content)
+            matches = _RE_LUA_ADDAPPID.findall(content) or _RE_LUA_TABLE.findall(content)
 
             for did, key in matches:
-                inv.setdefault(did, {"key": None, "manifest_file": None})
-                inv[did]["key"] = key
+                inv.setdefault(did, {"key": None, "manifest_file": None})["key"] = key
 
         for m in temp_dir.glob("*.manifest"):
-            match = re.match(r"^(\d+)_(\d+)\.manifest$", m.name)
+            match = _RE_MANIFEST.match(m.name)
             if match:
                 did = match.group(1)
-                inv.setdefault(did, {"key": None, "manifest_file": None})
-                inv[did]["manifest_file"] = m
+                inv.setdefault(did, {"key": None, "manifest_file": None})["manifest_file"] = m
 
         return inv
 
@@ -458,7 +463,9 @@ class App(tk.Tk):
     # DOWNLOAD
     # -----------------------------------------------------------------------
     def _on_download_click(self) -> None:
-        exe_path = Path(self.settings["exe_name"])
+        exe_name = self.settings["exe_name"]
+        exe_path = Path(exe_name) if Path(exe_name).is_absolute() else BASE_DIR / exe_name
+
         if not exe_path.exists():
             messagebox.showerror("Exec Error", f"Executable not found: {exe_path}")
             return
@@ -492,11 +499,11 @@ class App(tk.Tk):
         }
         await asyncio.to_thread(self._write_keys_file, keys_to_write)
 
-        max_concurrent = self.settings.get("max_concurrent_downloads", 3)
+        max_concurrent = self.settings.get("max_concurrent_downloads", 1)
         sem = asyncio.Semaphore(max_concurrent)
 
         tasks = [
-            asyncio.ensure_future(self._download_single(did, exe_path, app_id, sem))
+            asyncio.create_task(self._download_single(did, exe_path, app_id, sem))
             for did in selected_ids
         ]
 
@@ -540,7 +547,8 @@ class App(tk.Tk):
 
         manifest_src: Path = info["manifest_file"]
 
-        assert self._current_temp_dir is not None
+        if self._current_temp_dir is None:
+            raise RuntimeError("No temporary directory is set.")
 
         if not manifest_src.is_absolute():
             manifest_src = self._current_temp_dir / manifest_src.name
@@ -551,7 +559,8 @@ class App(tk.Tk):
             return
 
         manifest_id = match.group(1)
-        local_manifest = Path(manifest_src.name)
+        local_manifest = BASE_DIR / manifest_src.name
+
         try:
             await asyncio.to_thread(shutil.copy, str(manifest_src), str(local_manifest))
         except OSError as exc:
