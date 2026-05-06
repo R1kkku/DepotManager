@@ -30,7 +30,7 @@ else:
 
 SETTINGS_FILE = str(APP_DIR / "settings.json")
 KEYS_FILE = str(APP_DIR / "keys.txt")
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 _BANNER = (
     "  ____                  _       __  __                                    \n"
     " |  _ \\  ___ _ __   ___| |_    |  \\/  | __ _ _ __   __ _  __ _  ___ _ __ \n"
