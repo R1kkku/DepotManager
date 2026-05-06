@@ -30,6 +30,18 @@ else:
 
 SETTINGS_FILE = str(APP_DIR / "settings.json")
 KEYS_FILE = str(APP_DIR / "keys.txt")
+APP_VERSION = "1.0.0"
+_BANNER = (
+    "  ____                  _       __  __                                    \n"
+    " |  _ \\  ___ _ __   ___| |_    |  \\/  | __ _ _ __   __ _  __ _  ___ _ __ \n"
+    " | | | |/ _ \\ '_ \\ / _ \\ __|   | |\\/| |/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|\n"
+    " | |_| |  __/ |_) | (_) | |_   | |  | | (_| | | | | (_| | (_| |  __/ |   \n"
+    " |____/ \\___| .__/ \\___/ \\__|  |_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|_|  \n"
+    "            |_|                                          |___/         \n"
+    f"                       ~ HighSeas Edition  v{APP_VERSION} ~\n"
+    "\n"
+)
+
 
 DEFAULT_SETTINGS: dict = {
     "api_base_url": "https://manifest.morrenus.xyz/api/v1",
@@ -103,11 +115,15 @@ class App(tk.Tk):
 
         self._setup_ui()
         self._load_settings_into_ui()
+        self._print_banner()
         logger.info("Application started successfully.")
 
     # -----------------------------------------------------------------------
     # LIFECYCLE & ASYNC BRIDGE
     # -----------------------------------------------------------------------
+    def _print_banner(self) -> None:
+        self.console.insert(tk.END, _BANNER)
+    
     def on_close(self) -> None:
         self._flush_logs()
 
@@ -254,6 +270,15 @@ class App(tk.Tk):
 
         btn_frame = ttk.Frame(bottom_frame)
         btn_frame.pack(fill="x")
+
+        ttk.Separator(bottom_frame, orient="horizontal").pack(fill="x", pady=(8, 0))
+
+        ttk.Label(
+            bottom_frame,
+            text=f"DepotManager v{APP_VERSION}",
+            foreground="gray",
+            font=("Consolas", 8),
+        ).pack(anchor="e", pady=(3, 4))
 
         self.download_btn = ttk.Button(
             btn_frame, text="▶ START DOWNLOAD",
