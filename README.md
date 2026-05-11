@@ -11,10 +11,10 @@ Before running DepotManager, make sure you have the following in the **same fold
 
 - **An API Key** — required to fetch depot manifests  
   DepotManager supports two independent sources; you need a key for at least one:
-  - **Morrenus's API** —
-  - **Ryuu's API** —
+  - **Morrenus's API**
+  - **Ryuu's API**
   
-  >You can store keys for both and switch between them inside the app.
+  You can store keys for both and switch between them inside the app.
 
 ## Installation
 
