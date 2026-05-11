@@ -36,7 +36,7 @@ Before running DepotManager, make sure you have the following in the **same fold
 ### 2. Fetch depots for a game
 
 - Enter a valid **Steam AppID** in the *Enter AppID* field.
-- Click **Fetch Manifest** — the app will contact the Morrenus API and display all available depots.
+- Click **Fetch Manifest** — the app will contact the selected source and display all available depots.
 
 ### 3. Select depots to download
 
