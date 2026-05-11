@@ -17,7 +17,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 
-
 # ---------------------------------------------------------------------------
 # CONSTANTS
 # ---------------------------------------------------------------------------
@@ -30,7 +29,7 @@ else:
 
 SETTINGS_FILE = str(APP_DIR / "settings.json")
 KEYS_FILE = str(APP_DIR / "keys.txt")
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 _BANNER = (
     "  ____                  _       __  __                                    \n"
     " |  _ \\  ___ _ __   ___| |_    |  \\/  | __ _ _ __   __ _  __ _  ___ _ __ \n"
@@ -46,9 +45,22 @@ _BANNER = (
 DEFAULT_SETTINGS: dict = {
     "api_base_url": "https://manifest.morrenus.xyz/api/v1",
     "exe_name": "DepotDownloaderMod.exe",
-    "api_key": "",
+    "api_key_morrenus": "",
+    "api_key_ryuu": "",
+    "selected_source": "morrenus",
     "max_concurrent_downloads": 1,
     "request_timeout": 30,
+}
+
+SOURCES: dict = {
+    "morrenus": {
+        "label": "Morrenus's API",
+        "key_field": "api_key_morrenus",
+    },
+    "ryuu": {
+        "label": "Ryuu's API",
+        "key_field": "api_key_ryuu",
+    },
 }
 
 APPID_MIN = 1
@@ -178,7 +190,12 @@ class App(tk.Tk):
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    settings.update(json.load(f))
+                    loaded = json.load(f)
+                if "api_key" in loaded and not loaded.get("api_key_morrenus"):
+                    loaded["api_key_morrenus"] = loaded.pop("api_key")
+                else:
+                    loaded.pop("api_key", None)
+                settings.update(loaded)
                 logger.debug("Settings loaded from %s.", SETTINGS_FILE)
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("Cannot read settings file: %s. Using defaults.", exc)
@@ -223,10 +240,22 @@ class App(tk.Tk):
         top_frame = ttk.LabelFrame(self, text=" Configuration ", padding=10)
         top_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(top_frame, text="API Key:").grid(row=0, column=0, sticky="w")
+        ttk.Label(top_frame, text="Source:").grid(row=0, column=0, sticky="w")
+        self.source_var = tk.StringVar()
+        self.source_combo = ttk.Combobox(
+            top_frame,
+            textvariable=self.source_var,
+            values=[info["label"] for info in SOURCES.values()],
+            state="readonly",
+            width=20,
+        )
+        self.source_combo.grid(row=0, column=1, padx=5, sticky="w")
+        self.source_combo.bind("<<ComboboxSelected>>", self._on_source_change)
+
+        ttk.Label(top_frame, text="API Key:").grid(row=1, column=0, sticky="w")
         self.api_key_entry = ttk.Entry(top_frame, width=50, show="*")
-        self.api_key_entry.grid(row=0, column=1, padx=5)
-        ttk.Button(top_frame, text="Save Key", command=self._save_api_key).grid(row=0, column=2)
+        self.api_key_entry.grid(row=1, column=1, padx=5)
+        ttk.Button(top_frame, text="Save Key", command=self._save_api_key).grid(row=1, column=2)
 
         mid_frame = ttk.Frame(self, padding=10)
         mid_frame.pack(fill="x", padx=10)
@@ -293,14 +322,36 @@ class App(tk.Tk):
         self.stop_btn.pack(side="right", fill="x", expand=True, padx=(5, 0))
 
     def _load_settings_into_ui(self) -> None:
-        self.api_key_entry.insert(0, self.settings.get("api_key", ""))
+        selected = self.settings.get("selected_source", "morrenus")
+        if selected not in SOURCES:
+            selected = "morrenus"
+        self.source_var.set(SOURCES[selected]["label"])
+        key_field = SOURCES[selected]["key_field"]
+        self.api_key_entry.insert(0, self.settings.get(key_field, ""))
+
+    def _get_selected_source_key(self) -> str:
+        label = self.source_var.get()
+        for key, info in SOURCES.items():
+            if info["label"] == label:
+                return key
+        return "morrenus"
+
+    def _on_source_change(self, event=None) -> None:
+        source_key = self._get_selected_source_key()
+        self.settings["selected_source"] = source_key
+        self.api_key_entry.delete(0, tk.END)
+        key_field = SOURCES[source_key]["key_field"]
+        self.api_key_entry.insert(0, self.settings.get(key_field, ""))
 
     def _save_api_key(self) -> None:
         key = self.api_key_entry.get().strip()
         if len(key) < 10:
             messagebox.showwarning("Warning", "The API Key seems too short.")
             return
-        self.settings["api_key"] = key
+        source_key = self._get_selected_source_key()
+        key_field = SOURCES[source_key]["key_field"]
+        self.settings[key_field] = key
+        self.settings["selected_source"] = source_key
         self._save_settings()
         messagebox.showinfo("Success", "Settings saved.")
 
@@ -342,27 +393,36 @@ class App(tk.Tk):
     # -----------------------------------------------------------------------
     def _on_fetch_click(self) -> None:
         appid_str = self.appid_entry.get().strip()
-        key = self.api_key_entry.get().strip()
+        source_key = self._get_selected_source_key()
+        key_field = SOURCES[source_key]["key_field"]
+        key = self.settings.get(key_field, "").strip() or self.api_key_entry.get().strip()
 
         if not appid_str.isdigit():
             messagebox.showerror("Error", "Invalid AppID: must be numeric.")
             return
         appid_int = int(appid_str)
         if not (APPID_MIN <= appid_int <= APPID_MAX):
-            messagebox.showerror("Error", f"AppID out of range ({APPID_MIN} – {APPID_MAX}).")
+            messagebox.showerror("Error", f"AppID out of range ({APPID_MIN} \u2013 {APPID_MAX}).")
             return
         if len(key) < 10:
             messagebox.showerror("Error", "Missing or invalid API Key.")
             return
 
         self.fetch_btn.config(state="disabled")
-        self.run_async(self._fetch_and_scan(appid_str, key))
+        self.run_async(self._fetch_and_scan(appid_str, key, source_key))
 
-    async def _fetch_and_scan(self, app_id: str, api_key: str) -> None:
-        self.log_safe(f"[*] API request for AppID: {app_id}")
-        url = f"{self.settings['api_base_url']}/manifest/{app_id}"
+    async def _fetch_and_scan(self, app_id: str, api_key: str, source: str) -> None:
+        self.log_safe(f"[*] API request for AppID: {app_id} (source: {SOURCES[source]['label']})")
         timeout = aiohttp.ClientTimeout(total=self.settings.get("request_timeout", 30))
-        headers = {"User-Agent": "DepotManager/2.0", "X-API-Key": api_key}
+
+        if source == "ryuu":
+            url = "https://generator.ryuu.lol/secure_download"
+            headers = {"User-Agent": "DepotManager/2.0"}
+            params: Optional[dict] = {"appid": app_id, "auth_code": api_key}
+        else:  # morrenus (default)
+            url = f"{self.settings['api_base_url']}/manifest/{app_id}"
+            headers = {"User-Agent": "DepotManager/2.0", "X-API-Key": api_key}
+            params = None
 
         if self._current_temp_dir and self._current_temp_dir.exists():
             try:
@@ -380,7 +440,7 @@ class App(tk.Tk):
             raise RuntimeError("HTTP session is not initialized.")
 
         try:
-            async with self.session.get(url, headers=headers, timeout=timeout) as r:
+            async with self.session.get(url, headers=headers, params=params, timeout=timeout) as r:
                 if r.status in (401, 403):
                     self.after(0, lambda: messagebox.showerror("Auth Error", "API Key rejected by the server."))
                     logger.warning("API Key rejected (HTTP %s) for AppID %s.", r.status, app_id)
