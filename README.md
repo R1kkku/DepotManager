@@ -1,16 +1,20 @@
 # DepotManager
 
-A graphical desktop application for downloading Steam depots via the Morrenus API and DepotDownloaderMod.
+A graphical desktop application for downloading Steam depots via multiple manifest sources with DepotDownloaderMod.
 
 ## Requirements
 
 Before running DepotManager, make sure you have the following in the **same folder** as `DepotManager.exe`:
 
-- **DepotDownloaderMod.exe** — the underlying downloader engine
-  > Download it from its official release page and place it alongside `DepotManager.exe`.
+- **DepotDownloaderMod.exe** — the underlying downloader engine  
+  > Download all its files from the official release page and place them alongside `DepotManager.exe`.
 
-- **A valid Morrenus API Key** — required to fetch depot manifests
-  > Register and obtain your key at [https://manifest.morrenus.xyz](https://manifest.morrenus.xyz)
+- **An API Key** — required to fetch depot manifests  
+  DepotManager supports two independent sources; you need a key for at least one:
+  - **Morrenus's API** —
+  - **Ryuu's API** —
+  
+  >You can store keys for both and switch between them inside the app.
 
 ## Installation
 
@@ -23,8 +27,11 @@ Before running DepotManager, make sure you have the following in the **same fold
 
 ### 1. Configure your API Key
 
-- Paste your **Morrenus API Key** in the *API Key* field at the top.
+- Select your preferred source from the **Source** dropdown (*Morrenus's API* or *Ryuu's API*).
+- Paste the corresponding API key in the *API Key* field.
 - Click **Save Key** to persist it in `settings.json`.
+
+> You can store keys for both sources. Simply switch the **Source** dropdown and save a key for each one.
 
 ### 2. Fetch depots for a game
 
@@ -48,13 +55,15 @@ The following settings are stored in `settings.json`, located in the same folder
 
 | Key | Default | Description |
 | ----- | --------- | ------------- |
-| `api_key` | *(empty)* | Your Morrenus API key |
-| `api_base_url` | `https://manifest.morrenus.xyz/api/v1` | API endpoint |
+| `api_key_morrenus` | *(empty)* | API key for Morrenus's API |
+| `api_key_ryuu` | *(empty)* | API key for Ryuu's API |
+| `selected_source` | `morrenus` | Active API source (`morrenus` or `ryuu`) |
+| `api_base_url` | `https://manifest.morrenus.xyz/api/v1` | Morrenus API endpoint |
 | `exe_name` | `DepotDownloaderMod.exe` | Downloader executable name |
 | `max_concurrent_downloads` | `1` | Maximum simultaneous downloads |
 | `request_timeout` | `30` | HTTP request timeout in seconds |
 
-You do not need to edit this file manually. All values work out of the box — the only required change is saving your API Key through the application interface.
+You do not need to edit this file manually. All values work out of the box — the only required change is saving your API Key(s) through the application interface. You can store keys for both sources and switch between them at any time using the **Source** dropdown.
 
 ## Logging
 
