@@ -29,7 +29,7 @@ else:
 
 SETTINGS_FILE = str(APP_DIR / "settings.json")
 KEYS_FILE = str(APP_DIR / "keys.txt")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 _BANNER = (
     "  ____                  _       __  __                                    \n"
     " |  _ \\  ___ _ __   ___| |_    |  \\/  | __ _ _ __   __ _  __ _  ___ _ __ \n"
@@ -43,7 +43,8 @@ _BANNER = (
 
 
 DEFAULT_SETTINGS: dict = {
-    "api_base_url": "https://manifest.morrenus.xyz/api/v1",
+    "api_base_url_morrenus": "https://hubcapmanifest.com/api/v1",
+    "api_base_url_ryuu": "https://generator.ryuu.lol/secure_download",
     "exe_name": "DepotDownloaderMod.exe",
     "api_key_morrenus": "",
     "api_key_ryuu": "",
@@ -195,6 +196,10 @@ class App(tk.Tk):
                     loaded["api_key_morrenus"] = loaded.pop("api_key")
                 else:
                     loaded.pop("api_key", None)
+                if "api_base_url" in loaded and not loaded.get("api_base_url_morrenus"):
+                    loaded["api_base_url_morrenus"] = loaded.pop("api_base_url")
+                else:
+                    loaded.pop("api_base_url", None)
                 settings.update(loaded)
                 logger.debug("Settings loaded from %s.", SETTINGS_FILE)
             except (json.JSONDecodeError, OSError) as exc:
@@ -413,14 +418,15 @@ class App(tk.Tk):
 
     async def _fetch_and_scan(self, app_id: str, api_key: str, source: str) -> None:
         self.log_safe(f"[*] API request for AppID: {app_id} (source: {SOURCES[source]['label']})")
-        timeout = aiohttp.ClientTimeout(total=self.settings.get("request_timeout", 30))
+        timeout = aiohttp.ClientTimeout(total=self.settings["request_timeout"])
 
         if source == "ryuu":
-            url = "https://generator.ryuu.lol/secure_download"
+            url = self.settings["api_base_url_ryuu"]
             headers = {"User-Agent": "DepotManager/2.0"}
             params: Optional[dict] = {"appid": app_id, "auth_code": api_key}
-        else:  # morrenus (default)
-            url = f"{self.settings['api_base_url']}/manifest/{app_id}"
+        else:
+            base = self.settings["api_base_url_morrenus"].rstrip("/")
+            url = f"{base}/manifest/{app_id}"
             headers = {"User-Agent": "DepotManager/2.0", "X-API-Key": api_key}
             params = None
 
@@ -589,7 +595,7 @@ class App(tk.Tk):
         }
         await asyncio.to_thread(self._write_keys_file, keys_to_write)
 
-        max_concurrent = self.settings.get("max_concurrent_downloads", 1)
+        max_concurrent = self.settings["max_concurrent_downloads"]
         sem = asyncio.Semaphore(max_concurrent)
 
         tasks = [
