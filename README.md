@@ -58,7 +58,8 @@ The following settings are stored in `settings.json`, located in the same folder
 | `api_key_morrenus` | *(empty)* | API key for Morrenus's API |
 | `api_key_ryuu` | *(empty)* | API key for Ryuu's API |
 | `selected_source` | `morrenus` | Active API source (`morrenus` or `ryuu`) |
-| `api_base_url` | `https://manifest.morrenus.xyz/api/v1` | Morrenus API endpoint |
+| `api_base_url_morrenus` | `https://hubcapmanifest.com/api/v1` | Morrenus API endpoint |
+| `api_base_url_ryuu` | `https://generator.ryuu.lol/secure_download` | Ryuu API endpoint |
 | `exe_name` | `DepotDownloaderMod.exe` | Downloader executable name |
 | `max_concurrent_downloads` | `1` | Maximum simultaneous downloads |
 | `request_timeout` | `30` | HTTP request timeout in seconds |
@@ -73,6 +74,7 @@ A `depot_manager.log` file is created in the working directory and contains deta
 
 - A temporary `keys.txt` file is created during downloads and automatically deleted when the application closes.
 - Manifest files are copied temporarily to the working directory and deleted after each download completes.
+- **ATTENTION** - When updating to a new version, it is advisable to delete old `settings.json` to get a clean, up-to-date configuration. Before doing so, **note down your API keys** from the *API Key* field (or open `settings.json` and copy the values of `api_key_morrenus` and/or `api_key_ryuu`), then re-enter them after the first launch.
 
 ## Dependencies (If you want to run it with python)
 

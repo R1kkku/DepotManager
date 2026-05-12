@@ -41,7 +41,6 @@ _BANNER = (
     "\n"
 )
 
-
 DEFAULT_SETTINGS: dict = {
     "api_base_url_morrenus": "https://hubcapmanifest.com/api/v1",
     "api_base_url_ryuu": "https://generator.ryuu.lol/secure_download",
