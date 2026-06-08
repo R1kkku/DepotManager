@@ -15,4 +15,24 @@
 
 # Keep Source folder
 !Source/
-!Source/main.py
+!Source/DepotManager.spec
+!Source/run_depot_manager.py
+!Source/version_info.txt
+!Source/DepotManager/
+!Source/DepotManager/**
+!Source/DepotManager_Monolitic/
+!Source/DepotManager_Monolitic/**
+
+# Ignore settings, keys, logs, depots, and manifests
+Source/DepotManager/__pycache__/
+Source/DepotManager/settings.json
+Source/DepotManager/keys.txt
+Source/DepotManager/depot_manager.log
+Source/DepotManager/depots/
+Source/DepotManager/*.manifest
+Source/DepotManager_Monolitic/__pycache__/
+Source/DepotManager_Monolitic/settings.json
+Source/DepotManager_Monolitic/keys.txt
+Source/DepotManager_Monolitic/depot_manager.log
+Source/DepotManager_Monolitic/depots/
+Source/DepotManager_Monolitic/*.manifest
