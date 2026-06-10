@@ -180,6 +180,8 @@ class App(tk.Tk):
         self.appid_entry.pack(side="left", padx=5)
         self.fetch_btn = ttk.Button(mid_frame, text="Fetch Manifest", command=self._on_fetch_click)
         self.fetch_btn.pack(side="left")
+        self.load_btn = ttk.Button(mid_frame, text="Load Archive...", command=self._on_load_click)
+        self.load_btn.pack(side="left", padx=(5, 0))
         ttk.Separator(mid_frame, orient="vertical").pack(side="left", padx=10, fill="y")
         ttk.Button(mid_frame, text="☑ All", command=self._select_all).pack(side="left", padx=(0, 3))
         ttk.Button(mid_frame, text="☐ None", command=self._deselect_all).pack(side="left")
@@ -379,6 +381,121 @@ class App(tk.Tk):
 
         self.download_btn.config(state="normal")
 
+    def _on_load_click(self) -> None:
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="Select Depot Archive",
+            filetypes=[("ZIP Archives", "*.zip")]
+        )
+        if not file_path:
+            return
+
+        self.load_btn.config(state="disabled")
+        self.fetch_btn.config(state="disabled")
+        self.run_async(self._load_local_archive(Path(file_path)))
+
+    async def _load_local_archive(self, file_path: Path) -> None:
+        self.log_safe(f"[*] Loading local archive: {file_path.name}")
+
+        if self._current_temp_dir and self._current_temp_dir.exists():
+            try:
+                await asyncio.to_thread(shutil.rmtree, self._current_temp_dir)
+                logger.debug("Old temporary directory removed: %s", self._current_temp_dir)
+            except OSError as exc:
+                logger.warning("Cannot remove old temp_dir %s: %s", self._current_temp_dir, exc)
+
+        import tempfile
+        temp_dir = Path(tempfile.mkdtemp(prefix="depot_manager_"))
+        logger.debug("Temporary directory created: %s", temp_dir)
+        self._current_temp_dir = temp_dir
+
+        try:
+            from .parser import safe_extract, scan_directory
+            await asyncio.to_thread(safe_extract, file_path, temp_dir)
+            local_inv = await asyncio.to_thread(scan_directory, temp_dir)
+            appid_found = await asyncio.to_thread(self._find_appid_in_temp_dir, temp_dir, file_path)
+
+            self.after(0, self._update_local_inventory_and_ui, local_inv, temp_dir, appid_found)
+            self.log_safe("[+] Local scan completed.")
+
+        except Exception as exc:
+            logger.exception("Unexpected error loading local archive.")
+            self.after(0, lambda: messagebox.showerror("Error", f"Failed to load archive:\n{exc}"))
+        finally:
+            self.after(0, lambda: self.load_btn.config(state="normal"))
+            self.after(0, lambda: self.fetch_btn.config(state="normal"))
+
+    def _find_appid_in_temp_dir(self, temp_dir: Path, archive_path: Path) -> Optional[str]:
+        archive_stem = archive_path.stem
+        if archive_stem.isdigit():
+            return archive_stem
+
+        for lua_file in temp_dir.glob("*.lua"):
+            if lua_file.stem.isdigit():
+                return lua_file.stem
+
+        import re
+        from collections import Counter
+        re_comment_header = re.compile(r'--\s*(\d+)\'s\s+Lua', re.IGNORECASE)
+        re_main_app = re.compile(r'--\s*MAIN\s+APPLICATION\s*\r?\n\s*addappid\((\d+)', re.IGNORECASE)
+        re_fallback = re.compile(r'addappid\((\d+),\s*\d+,\s*"[A-Za-z0-9]+"\)')
+
+        for lua_file in temp_dir.glob("*.lua"):
+            try:
+                with open(lua_file, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+
+                match = re_comment_header.search(content)
+                if match:
+                    return match.group(1)
+
+                match = re_main_app.search(content)
+                if match:
+                    return match.group(1)
+
+                matches = re_fallback.findall(content)
+                if matches:
+                    valid_matches = [m for m in matches if m != "1"]
+                    if valid_matches:
+                        return valid_matches[0]
+
+            except OSError:
+                pass
+
+        return None
+
+    def _update_local_inventory_and_ui(self, local_inv: dict, temp_dir: Path, appid: Optional[str]) -> None:
+        if appid:
+            self.appid_entry.delete(0, tk.END)
+            self.appid_entry.insert(0, appid)
+            local_inv.pop(str(appid), None)
+        else:
+            current_appid = self.appid_entry.get().strip()
+            if current_appid:
+                local_inv.pop(current_appid, None)
+            messagebox.showinfo(
+                "AppID Required",
+                "Archive loaded successfully, but the AppID could not be automatically detected.\n"
+                "Please enter the correct AppID manually before downloading."
+            )
+
+        self.table_frame.config(text=f" Depots Found ({len(local_inv)}) ")
+
+        self.inventory = local_inv
+        self._current_temp_dir = temp_dir
+        self.checked_depots = {}
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        for did, info in sorted(self.inventory.items()):
+            self.checked_depots[did] = False
+            status = "✅ READY" if info["key"] and info["manifest_file"] else "⚠️ INCOMPLETE"
+            manifest_name = info["manifest_file"].name if info["manifest_file"] else "Missing"
+            self.tree.insert("", tk.END, values=("☐", did, status, info["key"] or "Missing", manifest_name))
+
+        self.download_btn.config(state="normal")
+
     # -----------------------------------------------------------------------
     # DOWNLOAD
     # -----------------------------------------------------------------------
@@ -396,10 +513,19 @@ class App(tk.Tk):
             return
 
         app_id = self.appid_entry.get().strip()
+        if not app_id.isdigit():
+            messagebox.showerror("Error", "Invalid AppID: must be numeric.")
+            return
+
+        appid_int = int(app_id)
+        if not (APPID_MIN <= appid_int <= APPID_MAX):
+            messagebox.showerror("Error", f"AppID out of range ({APPID_MIN} \u2013 {APPID_MAX}).")
+            return
 
         self.download_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.fetch_btn.config(state="disabled")
+        self.load_btn.config(state="disabled")
 
         self.download_task = self.run_async(self._process_downloads(selected_ids, exe_path, app_id))
 
@@ -435,3 +561,4 @@ class App(tk.Tk):
             self.after(0, lambda: self.download_btn.config(state="normal"))
             self.after(0, lambda: self.stop_btn.config(state="disabled"))
             self.after(0, lambda: self.fetch_btn.config(state="normal"))
+            self.after(0, lambda: self.load_btn.config(state="normal"))

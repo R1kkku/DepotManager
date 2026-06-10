@@ -2,6 +2,8 @@
 
 A modular graphical desktop application for downloading Steam depots via multiple manifest sources with [DepotDownloaderMod](https://github.com/SteamAutoCracks/DepotDownloaderMod).
 
+Supports both **API-based fetching** and **offline local archive loading**.
+
 ## Project Structure
 
 The source code has been refactored from a monolithic script into a clean, modular Python package:
@@ -32,7 +34,7 @@ Source/
 Official releases are distributed as a bundle with two physically separated components:
 
 ```txt
-DepotManager_v1.2.0/
+DepotManager_v1.3.0/
 ├── README.txt
 ├── DepotManager/
 │   └── DepotManager.exe       # GUI application (PyInstaller standalone)
@@ -50,22 +52,25 @@ Before running DepotManager, make sure the release bundle structure shown above 
   > Downloaded from the official release page and placed inside `DepotDownloaderMod/`.  
   > Repository: [SteamAutoCracks/DepotDownloaderMod](https://github.com/SteamAutoCracks/DepotDownloaderMod)
 
-- **An API Key** — required to fetch depot manifests  
-  DepotManager supports two independent sources; you need a key for at least one:
+- **For API mode:** An API key for at least one supported source:
   - **Morrenus's API** (HubcapManifest)
   - **Ryuu's API**
   
   You can store keys for both and switch between them inside the app.
 
+- **For Local Archive mode:** No API key required. A ZIP file containing `.lua` and `.manifest` files is sufficient.
+
 ## Installation
 
-1. Extract the release bundle (`DepotManager_v1.2.0/`) anywhere on your PC.
+1. Extract the release bundle (`DepotManager_v1.3.0/`) anywhere on your PC.
 2. Ensure `DepotManager/` and `DepotDownloaderMod/` remain side-by-side.
 3. Run `DepotManager/DepotManager.exe` — no installation required.
 
 ## Usage
 
-### 1. Configure your API Key
+### Method A: Download via API (requires API key)
+
+#### 1. Configure your API Key
 
 - Select your preferred source from the **Source** dropdown (*Morrenus's API* or *Ryuu's API*).
 - Paste the corresponding API key in the *API Key* field.
@@ -73,21 +78,29 @@ Before running DepotManager, make sure the release bundle structure shown above 
 
 > You can store keys for both sources. Simply switch the **Source** dropdown and save a key for each one.
 
-### 2. Fetch depots for a game
+#### 2. Fetch depots for a game
 
 - Enter a valid **Steam AppID** in the *Enter AppID* field.
 - Click **Fetch Manifest** — the app will contact the selected source and display all available depots.
 
-### 3. Select depots to download
+#### 3. Select depots and download
 
 - Each depot is listed with its **ID**, **status** (READY / INCOMPLETE), **decryption key**, and **manifest file**.
 - Click the checkbox column on each row to select depots, or use **Select All** / **Deselect All**.
-
-### 4. Start the download
-
-- Click **START DOWNLOAD**.
-- Output from DepotDownloaderMod will appear in the console area in real time.
+- Click **START DOWNLOAD** to begin. Output from DepotDownloaderMod will appear in real time.
 - Click **STOP** at any time to cancel all running downloads.
+
+### Method B: Download via Local Archive (offline, no API key)
+
+#### 1. Load a local archive
+
+- Click **Load Archive...** and select a ZIP file containing `.lua` and `.manifest` files.
+- The AppID is automatically detected from the archive name or `.lua` file contents.
+
+#### 2. Select depots and download
+
+- The depot list will populate automatically. Check the depots you want.
+- Click **START DOWNLOAD** to begin downloading.
 
 ## Configuration (`settings.json`)
 
