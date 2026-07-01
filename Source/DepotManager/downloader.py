@@ -109,15 +109,18 @@ class DownloadManager:
         app_id: str,
         game_dir: Path,
         output_dir: Path,
+        custom_filelists: Optional[Dict[str, List[str]]] = None,
     ) -> None:
         """
         Three-phase update flow:
-          Phase 1 — Snapshot: hash every file in game_dir before downloading.
+          Phase 1 — Snapshot: hash every file in game_dir before downloading (skipped if custom file list is loaded).
           Phase 2 — Download: run DepotDownloaderMod with -dir game_dir -validate
-                    (only changed chunks are fetched; files are updated in-place).
-          Phase 3 — Diff & Copy: compare current game_dir against the snapshot,
+                    (only changed chunks/files are fetched; files are updated in-place).
+          Phase 3 — Diff & Copy: compare current game_dir against the snapshot, or use the SteamDB file list,
                     copy every file that changed or is new into output_dir.
         """
+        steamdb_lists = custom_filelists if custom_filelists is not None else {}
+
         keys_to_write = {
             str(did): self.inventory[str(did)]["key"]
             for did in selected_ids
@@ -125,26 +128,45 @@ class DownloadManager:
         }
         await asyncio.to_thread(self._write_keys_file, keys_to_write)
 
-        # ── Phase 1: snapshot ──────────────────────────────────────────────
-        self.log_callback("[*] Phase 1/3 — Scanning game folder before download...")
-        snapshot = await asyncio.to_thread(self._snapshot_dir, game_dir)
-        self.log_callback(f"[+] Snapshot done: {len(snapshot)} files indexed.")
+        temp_filelists = {}
+        has_filelists = all(str(did) in steamdb_lists for did in selected_ids)
+
+        snapshot = {}
+        if not has_filelists:
+            # ── Phase 1: snapshot ──────────────────────────────────────────────
+            self.log_callback("[*] Phase 1/3 — Scanning game folder before download...")
+            snapshot = await asyncio.to_thread(self._snapshot_dir, game_dir)
+            self.log_callback(f"[+] Snapshot done: {len(snapshot)} files indexed.")
+        else:
+            self.log_callback("[*] SteamDB file lists found. Skipping directory snapshot!")
+            for did in selected_ids:
+                flist = steamdb_lists[str(did)]
+                import tempfile
+                temp_file = Path(tempfile.mktemp(prefix=f"filelist_{did}_", suffix=".txt", dir=str(APP_DIR)))
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    for filename in flist:
+                        f.write(f"{filename}\n")
+                temp_filelists[str(did)] = temp_file
+                self.log_callback(f"[+] Created file list for Depot {did} containing {len(flist)} files.")
 
         # ── Phase 2: download ──────────────────────────────────────────────
         self.log_callback("[*] Phase 2/3 — Downloading updates to game folder...")
         max_concurrent = self.settings.get("max_concurrent_downloads", 1)
         sem = asyncio.Semaphore(max_concurrent)
 
-        tasks = [
-            asyncio.create_task(
-                self._download_single(
-                    did, exe_path, app_id, sem,
-                    output_dir=game_dir,
-                    validate=True,
+        tasks = []
+        for did in selected_ids:
+            flist_path = temp_filelists.get(str(did))
+            tasks.append(
+                asyncio.create_task(
+                    self._download_single(
+                        did, exe_path, app_id, sem,
+                        output_dir=game_dir,
+                        validate=True,
+                        file_list_path=flist_path,
+                    )
                 )
             )
-            for did in selected_ids
-        ]
 
         try:
             try:
@@ -164,13 +186,37 @@ class DownloadManager:
                     raise RuntimeError(f"{len(errors)} depots encountered errors during download.")
 
                 # ── Phase 3: diff & copy ───────────────────────────────────
-                self.log_callback("[*] Phase 3/3 — Detecting changed files and copying to output...")
-                copied, unchanged = await asyncio.to_thread(
-                    self._copy_changed_files, game_dir, snapshot, output_dir
-                )
-                self.log_callback(
-                    f"[+] Changed/new files copied to output: {copied}  |  Unchanged skipped: {unchanged}"
-                )
+                if has_filelists:
+                    self.log_callback("[*] Phase 3/3 — Copying update files to output...")
+                    copied = 0
+                    missing = 0
+                    for did in selected_ids:
+                        flist = steamdb_lists[str(did)]
+                        for relative_name in flist:
+                            game_file = game_dir / relative_name
+                            dest = output_dir / relative_name
+                            if game_file.is_file():
+                                try:
+                                    dest.parent.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(str(game_file), str(dest))
+                                    copied += 1
+                                    logger.debug("Copied update file: %s", relative_name)
+                                except OSError as exc:
+                                    logger.warning("Cannot copy %s to output: %s", relative_name, exc)
+                                    self.log_callback(f"    [❌] Failed: {relative_name} ({exc})")
+                            else:
+                                missing += 1
+                                logger.warning("Expected update file not found: %s", relative_name)
+                                self.log_callback(f"    [⚠️] Missing (not downloaded): {relative_name}")
+                    self.log_callback(f"[+] Finished: Copied {copied} files to output directory.")
+                else:
+                    self.log_callback("[*] Phase 3/3 — Detecting changed files and copying to output...")
+                    copied, unchanged = await asyncio.to_thread(
+                        self._copy_changed_files, game_dir, snapshot, output_dir
+                    )
+                    self.log_callback(
+                        f"[+] Changed/new files copied to output: {copied}  |  Unchanged skipped: {unchanged}"
+                    )
                 self.log_callback("--- ✅ UPDATE COMPLETE ---")
 
             except asyncio.CancelledError:
@@ -179,6 +225,14 @@ class DownloadManager:
                 self.log_callback("--- 🛑 UPDATE DOWNLOAD CANCELLED ---")
                 raise
         finally:
+            for flist_path in temp_filelists.values():
+                if flist_path.exists():
+                    try:
+                        flist_path.unlink()
+                        logger.debug("Deleted temporary file list: %s", flist_path)
+                    except OSError as exc:
+                        logger.warning("Cannot delete temporary file list %s: %s", flist_path, exc)
+
             keys_path = Path(KEYS_FILE)
             if keys_path.exists():
                 try:
@@ -282,6 +336,7 @@ class DownloadManager:
         output_dir: Optional[Path] = None,
         validate: bool = False,
         validate_dir: Optional[Path] = None,
+        file_list_path: Optional[Path] = None,
     ) -> None:
         """Downloads a single depot using DepotDownloaderMod.exe in a subprocess.
 
@@ -343,6 +398,8 @@ class DownloadManager:
             ]
             if effective_dir is not None:
                 cmd += ["-dir", str(effective_dir)]
+            if file_list_path is not None:
+                cmd += ["-filelist", str(file_list_path)]
             # Add -validate when validate_dir is set OR the plain validate flag is on
             if validate_dir is not None or validate:
                 cmd += ["-validate"]

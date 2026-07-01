@@ -47,6 +47,7 @@ class App(tk.Tk):
         self.settings: dict = load_settings()
         self.inventory: dict = {}
         self.checked_depots: dict[str, bool] = {}
+        self.custom_filelists: dict = {}
         self.download_task: Optional[concurrent.futures.Future] = None
         self._inner_task: Optional[asyncio.Task] = None
         self._current_temp_dir: Optional[Path] = None
@@ -182,6 +183,8 @@ class App(tk.Tk):
         self.fetch_btn.pack(side="left")
         self.load_btn = ttk.Button(mid_frame, text="Load Archive...", command=self._on_load_click)
         self.load_btn.pack(side="left", padx=(5, 0))
+        self.steamdb_btn = ttk.Button(mid_frame, text="Get SteamDB Files...", command=self._on_steamdb_click, state="disabled")
+        self.steamdb_btn.pack(side="left", padx=(5, 0))
         ttk.Separator(mid_frame, orient="vertical").pack(side="left", padx=10, fill="y")
         ttk.Button(mid_frame, text="☑ All", command=self._select_all).pack(side="left", padx=(0, 3))
         ttk.Button(mid_frame, text="☐ None", command=self._deselect_all).pack(side="left")
@@ -387,6 +390,7 @@ class App(tk.Tk):
 
         self.download_btn.config(state="normal")
         self.update_btn.config(state="normal")
+        self.steamdb_btn.config(state="normal")
 
     def _on_load_click(self) -> None:
         from tkinter import filedialog
@@ -503,6 +507,7 @@ class App(tk.Tk):
 
         self.download_btn.config(state="normal")
         self.update_btn.config(state="normal")
+        self.steamdb_btn.config(state="normal")
 
     # -----------------------------------------------------------------------
     # DOWNLOAD UPDATES  (separate output folder, validate + filter unchanged)
@@ -560,6 +565,7 @@ class App(tk.Tk):
         self.stop_btn.config(state="normal")
         self.fetch_btn.config(state="disabled")
         self.load_btn.config(state="disabled")
+        self.steamdb_btn.config(state="disabled")
 
         self.download_task = self.run_async(
             self._process_update_downloads(selected_ids, exe_path, app_id, game_path, output_path)
@@ -576,11 +582,17 @@ class App(tk.Tk):
         """Async task: snapshots game folder, downloads updates in-place, copies changed files."""
         self._inner_task = asyncio.current_task()
 
+        custom_lists = getattr(self, "custom_filelists", {})
+        has_steamdb_list = any(did in custom_lists for did in selected_ids)
+
         self.log_safe("[*] Update download started.")
         self.log_safe(f"    Game dir    : {game_dir}")
         self.log_safe(f"    Output dir  : {output_dir}")
         self.log_safe(f"    Depots      : {', '.join(selected_ids)}")
-        self.log_safe("    Phase 1: snapshot → Phase 2: download (-validate) → Phase 3: copy changes")
+        if has_steamdb_list:
+            self.log_safe("    Mode        : SteamDB File List (Fast - No Hashing)")
+        else:
+            self.log_safe("    Mode        : Directory Snapshot (Slow - Comparing Hashes)")
 
         downloader = DownloadManager(
             self.settings,
@@ -591,7 +603,8 @@ class App(tk.Tk):
 
         try:
             await downloader.run_update_downloads(
-                selected_ids, exe_path, app_id, game_dir, output_dir
+                selected_ids, exe_path, app_id, game_dir, output_dir,
+                custom_filelists=custom_lists
             )
             self.after(0, lambda: messagebox.showinfo(
                 "Update Complete",
@@ -614,6 +627,7 @@ class App(tk.Tk):
             self.after(0, lambda: self.stop_btn.config(state="disabled"))
             self.after(0, lambda: self.fetch_btn.config(state="normal"))
             self.after(0, lambda: self.load_btn.config(state="normal"))
+            self.after(0, lambda: self.steamdb_btn.config(state="normal"))
 
     # -----------------------------------------------------------------------
     # DOWNLOAD (full)
@@ -656,6 +670,7 @@ class App(tk.Tk):
         self.stop_btn.config(state="normal")
         self.fetch_btn.config(state="disabled")
         self.load_btn.config(state="disabled")
+        self.steamdb_btn.config(state="disabled")
 
         # Pass the same path as both output_dir and validate_dir
         self.download_task = self.run_async(
@@ -712,3 +727,134 @@ class App(tk.Tk):
             self.after(0, lambda: self.stop_btn.config(state="disabled"))
             self.after(0, lambda: self.fetch_btn.config(state="normal"))
             self.after(0, lambda: self.load_btn.config(state="normal"))
+            self.after(0, lambda: self.steamdb_btn.config(state="normal"))
+
+    def _on_steamdb_click(self) -> None:
+        """Opens the SteamDB input/paste dialog for the selected depot."""
+        selected_item = self.tree.focus()
+        if not selected_item:
+            selected_ids = [did for did, checked in self.checked_depots.items() if checked]
+            if len(selected_ids) == 1:
+                did = selected_ids[0]
+            else:
+                messagebox.showwarning("No Selection", "Please click/select a depot in the table first.")
+                return
+        else:
+            did = str(self.tree.item(selected_item)["values"][1])
+
+        app_id = self.appid_entry.get().strip()
+        info = self.inventory.get(did)
+        if not info or not info["manifest_file"]:
+            messagebox.showerror("Error", f"No manifest file available for depot {did}.")
+            return
+
+        import re
+        match = re.search(r"_(\d+)\.manifest$", info["manifest_file"].name)
+        if not match:
+            messagebox.showerror("Error", f"Could not extract manifest ID for depot {did}.")
+            return
+        manifest_id = match.group(1)
+
+        self._show_steamdb_paste_dialog(did, app_id, manifest_id)
+
+    def _show_steamdb_paste_dialog(self, depot_id: str, app_id: str, manifest_id: str) -> None:
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Get SteamDB Files — Depot {depot_id}")
+        dialog.geometry("650x480")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        instructions = (
+            f"1. Click the button below to open the SteamDB patchnotes page for App {app_id}.\n"
+            f"2. Click on the latest patch note build, then find the list of files under Depot {depot_id}.\n"
+            f"3. Select and copy (Ctrl+C) the list of files (e.g. 'Modified BenchmarkDefinition.x64.Release.dll').\n"
+            f"4. Paste it in the box below and click 'Parse and Apply'."
+        )
+        ttk.Label(dialog, text=instructions, justify="left", padding=10).pack(fill="x")
+
+        # Open the main patchnotes page for the App, which works in any browser
+        patchnotes_url = f"https://steamdb.info/app/{app_id}/patchnotes/"
+
+        url_frame = ttk.Frame(dialog, padding=5)
+        url_frame.pack(fill="x")
+
+        url_entry = ttk.Entry(url_frame)
+        url_entry.insert(0, patchnotes_url)
+        url_entry.config(state="readonly")
+        url_entry.pack(side="left", fill="x", expand=True, padx=(5, 5))
+
+        def open_url():
+            import webbrowser
+            webbrowser.open(patchnotes_url)
+
+        ttk.Button(url_frame, text="Open Link in Browser", command=open_url).pack(side="right", padx=5)
+
+        text_frame = ttk.Frame(dialog, padding=5)
+        text_frame.pack(fill="both", expand=True)
+
+        scroll_text = scrolledtext.ScrolledText(text_frame, height=12)
+        scroll_text.pack(fill="both", expand=True, padx=5, pady=5)
+
+        btn_frame = ttk.Frame(dialog, padding=5)
+        btn_frame.pack(fill="x")
+
+        def parse_and_apply():
+            content = scroll_text.get("1.0", tk.END).strip()
+            if not content:
+                messagebox.showwarning("Empty", "Please paste the SteamDB response first.", parent=dialog)
+                return
+
+            import re
+            pattern = re.compile(r'<span>(Modified|Added|Removed)\s*<i>([^<]+)</i>', re.IGNORECASE)
+            matches = pattern.findall(content)
+
+            if not matches:
+                # Fallback: Parse plain text copied directly from the webpage selection
+                text_lines = content.splitlines()
+                for line in text_lines:
+                    m = re.match(r'^\s*(Modified|Added|Removed)\s+(.+)$', line.strip(), re.IGNORECASE)
+                    if m:
+                        action = m.group(1)
+                        filename = m.group(2).strip()
+                        # Remove size changes like (-60.15 KiB) or (+2.50 KiB)
+                        filename = re.sub(r'\s*\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)$', '', filename, flags=re.IGNORECASE)
+                        filename = filename.strip(' "\'')
+                        matches.append((action, filename))
+
+            if not matches:
+                messagebox.showerror("Parsing Failed", "Could not find any modified or added files in the pasted content.\n\nMake sure to copy the list of files from the SteamDB webpage (e.g. including 'Modified' or 'Added').", parent=dialog)
+                return
+
+            update_files = []
+            for action, filename in matches:
+                if action.lower() in ("modified", "added"):
+                    # Extra safety: strip size suffix if present
+                    filename = re.sub(r'\s*\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)$', '', filename, flags=re.IGNORECASE)
+                    filename = filename.strip(' "\'')
+                    update_files.append(filename)
+
+            if not update_files:
+                messagebox.showinfo("No Updates", "Found only removed files. No files to download.", parent=dialog)
+                dialog.destroy()
+                return
+
+            if not hasattr(self, "custom_filelists"):
+                self.custom_filelists = {}
+            self.custom_filelists[depot_id] = update_files
+
+            self.log_safe(f"[+] Loaded {len(update_files)} update files from SteamDB for Depot {depot_id}")
+
+            for item in self.tree.get_children():
+                values = self.tree.item(item)["values"]
+                if str(values[1]) == depot_id:
+                    new_values = list(values)
+                    new_values[2] = f"✅ READY ({len(update_files)} files)"
+                    self.tree.item(item, values=new_values)
+                    break
+
+            messagebox.showinfo("Success", f"Successfully loaded {len(update_files)} files for Depot {depot_id}.", parent=dialog)
+            dialog.destroy()
+
+        ttk.Button(btn_frame, text="Parse and Apply", command=parse_and_apply).pack(side="right", padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="right", padx=5)
+
