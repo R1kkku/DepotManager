@@ -32,10 +32,18 @@ _BANNER = (
     "\n"
 )
 
+# When frozen (compiled .exe), DepotDownloaderMod sits next to the exe.
+# When running from source, it lives one directory above the package.
+_DEFAULT_EXE_NAME = (
+    "DepotDownloaderMod/DepotDownloaderMod.exe"
+    if getattr(sys, "frozen", False)
+    else "../DepotDownloaderMod/DepotDownloaderMod.exe"
+)
+
 DEFAULT_SETTINGS: dict = {
     "api_base_url_morrenus": "https://hubcapmanifest.com/api/v1",
     "api_base_url_ryuu": "https://generator.ryuu.lol/secure_download",
-    "exe_name": "../DepotDownloaderMod/DepotDownloaderMod.exe",
+    "exe_name": _DEFAULT_EXE_NAME,
     "api_key_morrenus": "",
     "api_key_ryuu": "",
     "selected_source": "morrenus",
@@ -83,9 +91,22 @@ def load_settings() -> dict:
                 loaded["api_base_url_morrenus"] = loaded.pop("api_base_url")
             else:
                 loaded.pop("api_base_url", None)
-            # Auto-migrate exe_name if it points to the old default relative path
-            if loaded.get("exe_name") == "DepotDownloaderMod.exe":
-                loaded["exe_name"] = "../DepotDownloaderMod/DepotDownloaderMod.exe"
+            # Migrate exe_name: fix any path that no longer resolves correctly
+            saved_exe = loaded.get("exe_name", "")
+            stale_paths = {
+                "DepotDownloaderMod.exe",
+                "../DepotDownloaderMod/DepotDownloaderMod.exe",
+                "..\\DepotDownloaderMod\\DepotDownloaderMod.exe",
+            }
+            if saved_exe in stale_paths:
+                resolved = (
+                    APP_DIR / saved_exe.replace("\\", "/")
+                ).resolve()
+                if not resolved.exists():
+                    loaded["exe_name"] = _DEFAULT_EXE_NAME
+                    logger.debug(
+                        "Migrated stale exe_name '%s' → '%s'", saved_exe, _DEFAULT_EXE_NAME
+                    )
             
             settings.update(loaded)
             logger.debug("Settings loaded from %s.", SETTINGS_FILE)

@@ -232,6 +232,12 @@ class App(tk.Tk):
         )
         self.download_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
+        self.update_btn = ttk.Button(
+            btn_frame, text="📥 DOWNLOAD UPDATES",
+            command=self._on_update_click, state="disabled"
+        )
+        self.update_btn.pack(side="left", fill="x", expand=True, padx=(5, 5))
+
         self.stop_btn = ttk.Button(
             btn_frame, text="🛑 STOP",
             command=self._on_stop_click, state="disabled"
@@ -380,6 +386,7 @@ class App(tk.Tk):
             self.tree.insert("", tk.END, values=("☐", did, status, info["key"] or "Missing", manifest_name))
 
         self.download_btn.config(state="normal")
+        self.update_btn.config(state="normal")
 
     def _on_load_click(self) -> None:
         from tkinter import filedialog
@@ -495,11 +502,125 @@ class App(tk.Tk):
             self.tree.insert("", tk.END, values=("☐", did, status, info["key"] or "Missing", manifest_name))
 
         self.download_btn.config(state="normal")
+        self.update_btn.config(state="normal")
 
     # -----------------------------------------------------------------------
-    # DOWNLOAD
+    # DOWNLOAD UPDATES  (separate output folder, validate + filter unchanged)
+    # -----------------------------------------------------------------------
+    def _on_update_click(self) -> None:
+        """Starts an update-only download: grabs changed files into a separate folder."""
+        from tkinter import filedialog
+
+        exe_name = self.settings["exe_name"]
+        exe_path = Path(exe_name) if Path(exe_name).is_absolute() else APP_DIR / exe_name
+        if not exe_path.exists():
+            messagebox.showerror("Exec Error", f"Executable not found:\n{exe_path}")
+            return
+
+        if not self.inventory:
+            messagebox.showwarning("No Data", "Load a manifest archive or fetch via API first.")
+            return
+
+        selected_ids = [did for did, checked in self.checked_depots.items() if checked]
+        if not selected_ids:
+            messagebox.showwarning("Warning", "Select at least one depot using the checkboxes.")
+            return
+
+        app_id = self.appid_entry.get().strip()
+        if not app_id.isdigit():
+            messagebox.showerror("Error", "Invalid AppID: must be numeric.")
+            return
+
+        # Step 1 — game install folder (download target; snapshot taken before download)
+        game_dir = filedialog.askdirectory(
+            title="Step 1/2: Select your GAME INSTALL folder (updates applied here)"
+        )
+        if not game_dir:
+            return
+
+        # Step 2 — separate output folder where changed files will be copied
+        output_dir = filedialog.askdirectory(
+            title="Step 2/2: Select OUTPUT folder (changed files copied here)"
+        )
+        if not output_dir:
+            return
+
+        game_path = Path(game_dir)
+        output_path = Path(output_dir)
+
+        if game_path == output_path:
+            messagebox.showerror(
+                "Same Folder",
+                "The game folder and output folder must be different."
+            )
+            return
+
+        self.download_btn.config(state="disabled")
+        self.update_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
+        self.fetch_btn.config(state="disabled")
+        self.load_btn.config(state="disabled")
+
+        self.download_task = self.run_async(
+            self._process_update_downloads(selected_ids, exe_path, app_id, game_path, output_path)
+        )
+
+    async def _process_update_downloads(
+        self,
+        selected_ids: list,
+        exe_path: Path,
+        app_id: str,
+        game_dir: Path,
+        output_dir: Path,
+    ) -> None:
+        """Async task: snapshots game folder, downloads updates in-place, copies changed files."""
+        self._inner_task = asyncio.current_task()
+
+        self.log_safe("[*] Update download started.")
+        self.log_safe(f"    Game dir    : {game_dir}")
+        self.log_safe(f"    Output dir  : {output_dir}")
+        self.log_safe(f"    Depots      : {', '.join(selected_ids)}")
+        self.log_safe("    Phase 1: snapshot → Phase 2: download (-validate) → Phase 3: copy changes")
+
+        downloader = DownloadManager(
+            self.settings,
+            self.inventory,
+            self._current_temp_dir,
+            self.log_safe,
+        )
+
+        try:
+            await downloader.run_update_downloads(
+                selected_ids, exe_path, app_id, game_dir, output_dir
+            )
+            self.after(0, lambda: messagebox.showinfo(
+                "Update Complete",
+                f"Changed files saved to:\n{output_dir}\n\n"
+                "Your game folder has been updated in-place.\n"
+                "The output folder contains only the files that changed."
+            ))
+        except asyncio.CancelledError:
+            self.after(0, lambda: messagebox.showwarning("Cancelled", "Update download cancelled."))
+        except Exception:
+            self.after(0, lambda: messagebox.showwarning(
+                "Completed with errors",
+                "Update download encountered errors. Check the log for details."
+            ))
+        finally:
+            self._inner_task = None
+            self.download_task = None
+            self.after(0, lambda: self.download_btn.config(state="normal"))
+            self.after(0, lambda: self.update_btn.config(state="normal"))
+            self.after(0, lambda: self.stop_btn.config(state="disabled"))
+            self.after(0, lambda: self.fetch_btn.config(state="normal"))
+            self.after(0, lambda: self.load_btn.config(state="normal"))
+
+    # -----------------------------------------------------------------------
+    # DOWNLOAD (full)
     # -----------------------------------------------------------------------
     def _on_download_click(self) -> None:
+        from tkinter import filedialog
+
         exe_name = self.settings["exe_name"]
         exe_path = Path(exe_name) if Path(exe_name).is_absolute() else APP_DIR / exe_name
 
@@ -522,12 +643,24 @@ class App(tk.Tk):
             messagebox.showerror("Error", f"AppID out of range ({APPID_MIN} \u2013 {APPID_MAX}).")
             return
 
+        # Single folder — used as both the download destination and validate target
+        download_dir = filedialog.askdirectory(
+            title="Select DOWNLOAD / INSTALL folder (only changed or missing files will be fetched)"
+        )
+        if not download_dir:
+            return
+
+        download_path = Path(download_dir)
+
         self.download_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.fetch_btn.config(state="disabled")
         self.load_btn.config(state="disabled")
 
-        self.download_task = self.run_async(self._process_downloads(selected_ids, exe_path, app_id))
+        # Pass the same path as both output_dir and validate_dir
+        self.download_task = self.run_async(
+            self._process_downloads(selected_ids, exe_path, app_id, download_path, download_path)
+        )
 
     def _on_stop_click(self) -> None:
         if self._inner_task and not self._inner_task.done():
@@ -535,7 +668,14 @@ class App(tk.Tk):
             self.log_safe("⚠️ Stop requested, terminating processes...")
             self.loop.call_soon_threadsafe(self._inner_task.cancel)
 
-    async def _process_downloads(self, selected_ids: list, exe_path: Path, app_id: str) -> None:
+    async def _process_downloads(
+        self,
+        selected_ids: list,
+        exe_path: Path,
+        app_id: str,
+        output_dir: Optional[Path] = None,
+        validate_dir: Optional[Path] = None,
+    ) -> None:
         self._inner_task = asyncio.current_task()
 
         downloader = DownloadManager(
@@ -545,8 +685,17 @@ class App(tk.Tk):
             self.log_safe
         )
 
+        if output_dir:
+            self.log_safe("[*] Download started.")
+            self.log_safe(f"    Download dir : {output_dir}")
+            if validate_dir:
+                self.log_safe(f"    Validate dir : {validate_dir}  (only changed/missing files will be fetched)")
+            else:
+                self.log_safe("    Validate dir : (none — full download)")
+            self.log_safe(f"    Depots       : {', '.join(selected_ids)}")
+
         try:
-            await downloader.run_downloads(selected_ids, exe_path, app_id)
+            await downloader.run_downloads(selected_ids, exe_path, app_id, output_dir, validate_dir)
             self.after(0, lambda: messagebox.showinfo("Completed", "All downloads completed."))
         except asyncio.CancelledError:
             self.after(0, lambda: messagebox.showwarning("Cancelled", "Downloads successfully cancelled."))
@@ -559,6 +708,7 @@ class App(tk.Tk):
             self._inner_task = None
             self.download_task = None
             self.after(0, lambda: self.download_btn.config(state="normal"))
+            self.after(0, lambda: self.update_btn.config(state="normal"))
             self.after(0, lambda: self.stop_btn.config(state="disabled"))
             self.after(0, lambda: self.fetch_btn.config(state="normal"))
             self.after(0, lambda: self.load_btn.config(state="normal"))
