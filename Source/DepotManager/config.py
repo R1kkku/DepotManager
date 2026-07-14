@@ -19,7 +19,7 @@ SETTINGS_FILE = str(APP_DIR / "settings.json")
 KEYS_FILE = str(APP_DIR / "keys.txt")
 LOG_FILE = str(APP_DIR / "depot_manager.log")
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 _BANNER = (
     "  ____                  _       __  __                                    \n"

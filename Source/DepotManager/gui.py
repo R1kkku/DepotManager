@@ -48,6 +48,7 @@ class App(tk.Tk):
         self.inventory: dict = {}
         self.checked_depots: dict[str, bool] = {}
         self.custom_filelists: dict = {}
+        self.removed_files: list[str] = []  # 'Removed' entries from SteamDB paste
         self.download_task: Optional[concurrent.futures.Future] = None
         self._inner_task: Optional[asyncio.Task] = None
         self._current_temp_dir: Optional[Path] = None
@@ -606,6 +607,12 @@ class App(tk.Tk):
                 selected_ids, exe_path, app_id, game_dir, output_dir,
                 custom_filelists=custom_lists
             )
+            # ── Optional Phase 4: delete removed files ─────────────────────
+            removed = getattr(self, "removed_files", [])
+            if removed:
+                game_dir_capture = game_dir
+                removed_capture = list(removed)
+                self.after(0, lambda: self._prompt_delete_removed(game_dir_capture, removed_capture))
             self.after(0, lambda: messagebox.showinfo(
                 "Update Complete",
                 f"Changed files saved to:\n{output_dir}\n\n"
@@ -728,6 +735,7 @@ class App(tk.Tk):
             self.after(0, lambda: self.fetch_btn.config(state="normal"))
             self.after(0, lambda: self.load_btn.config(state="normal"))
             self.after(0, lambda: self.steamdb_btn.config(state="normal"))
+            self.after(0, lambda: self.changes_btn.config(state="normal"))
 
     def _on_steamdb_click(self) -> None:
         """Opens the SteamDB input/paste dialog for the selected depot."""
@@ -809,16 +817,32 @@ class App(tk.Tk):
             matches = pattern.findall(content)
 
             if not matches:
-                # Fallback: Parse plain text copied directly from the webpage selection
+                # Fallback: Parse plain text copied directly from the webpage selection.
+                # Three-way rule to distinguish files from SteamDB directory entries:
+                #   1. Has a size annotation (e.g. "(1.42 KiB)")  → always a file, include.
+                #   2. No size, but has a file extension (.dll, .zip, …) → file, include.
+                #   3. No size AND no file extension                → directory entry, skip.
+                _re_size = re.compile(r'\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)\s*$', re.IGNORECASE)
                 text_lines = content.splitlines()
                 for line in text_lines:
                     m = re.match(r'^\s*(Modified|Added|Removed)\s+(.+)$', line.strip(), re.IGNORECASE)
                     if m:
                         action = m.group(1)
                         filename = m.group(2).strip()
-                        # Remove size changes like (-60.15 KiB) or (+2.50 KiB)
-                        filename = re.sub(r'\s*\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)$', '', filename, flags=re.IGNORECASE)
+                        has_size = bool(_re_size.search(filename))
+                        # Strip size annotation when present
+                        filename = _re_size.sub('', filename).strip()
                         filename = filename.strip(' "\'')
+                        if not filename:
+                            continue
+                        # Determine if this entry is a file or a directory:
+                        #   • has_size      → definitely a file (Steam always sizes files)
+                        #   • has extension → file without a size listing (e.g. some DLLs)
+                        #   • neither       → directory path listed by SteamDB, skip it
+                        basename = filename.rsplit('/', 1)[-1].rsplit('\\', 1)[-1]
+                        has_extension = '.' in basename
+                        if not has_size and not has_extension:
+                            continue  # directory entry — not a downloadable file
                         matches.append((action, filename))
 
             if not matches:
@@ -826,12 +850,21 @@ class App(tk.Tk):
                 return
 
             update_files = []
+            removed_entries = []
             for action, filename in matches:
-                if action.lower() in ("modified", "added"):
-                    # Extra safety: strip size suffix if present
-                    filename = re.sub(r'\s*\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)$', '', filename, flags=re.IGNORECASE)
-                    filename = filename.strip(' "\'')
+                action_l = action.lower()
+                # Extra safety: strip size suffix if present
+                filename = re.sub(r'\s*\([+-]?\d+(?:\.\d+)?\s*(?:KiB|MiB|GiB|B|KB|MB|GB)\)$', '', filename, flags=re.IGNORECASE)
+                filename = filename.strip(' "\'')
+                if action_l in ("modified", "added"):
                     update_files.append(filename)
+                elif action_l == "removed":
+                    removed_entries.append(filename)
+
+            # Persist removed list so the update flow can offer to delete them
+            self.removed_files = removed_entries
+            if removed_entries:
+                self.log_safe(f"[i] {len(removed_entries)} 'Removed' entries saved — will prompt for deletion after update.")
 
             if not update_files:
                 messagebox.showinfo("No Updates", "Found only removed files. No files to download.", parent=dialog)
@@ -858,3 +891,43 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Parse and Apply", command=parse_and_apply).pack(side="right", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side="right", padx=5)
 
+    # -----------------------------------------------------------------------
+    # DELETE REMOVED FILES
+    # -----------------------------------------------------------------------
+    def _prompt_delete_removed(self, game_dir: Path, removed_files: list[str]) -> None:
+        """Asks the user to confirm, then deletes files listed as 'Removed' in SteamDB."""
+        if not removed_files:
+            return
+
+        answer = messagebox.askyesno(
+            "Delete Removed Files?",
+            f"{len(removed_files)} file(s) are marked as 'Removed' in the SteamDB patch notes.\n"
+            f"Do you want to delete them from:\n{game_dir}\n\n"
+            "This cannot be undone. Continue?",
+        )
+        if not answer:
+            self.log_safe("[i] Skipped deletion of removed files.")
+            return
+
+        deleted = 0
+        skipped = 0
+        errors = 0
+        for rel_path in removed_files:
+            target = game_dir / rel_path
+            if target.is_file():
+                try:
+                    target.unlink()
+                    self.log_safe(f"    [🗑️] Deleted: {rel_path}")
+                    logger.debug("Deleted removed file: %s", target)
+                    deleted += 1
+                except OSError as exc:
+                    self.log_safe(f"    [❌] Could not delete {rel_path}: {exc}")
+                    logger.warning("Cannot delete %s: %s", target, exc)
+                    errors += 1
+            else:
+                self.log_safe(f"    [⏭️] Not found (already gone?): {rel_path}")
+                skipped += 1
+
+        self.log_safe(
+            f"[+] Deletion complete: {deleted} deleted, {skipped} not found, {errors} errors."
+        )
